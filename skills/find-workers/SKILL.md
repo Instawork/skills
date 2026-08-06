@@ -15,6 +15,7 @@ For connection and authentication setup, see [setup.md](setup.md).
 | --------------------------------------- | ----------------------------------------------------------------------------------------- |
 | `searchCompanyLocations`                | Search for company locations, optionally filtered by a search query                       |
 | `getPositions`                          | Get a list of all available positions                                                     |
+| `getPositionTiers`                      | Get the available skill tiers for a position                                              |
 | `getPositionTemplates`                  | Get all available position templates for a company                                        |
 | `getPositionTemplateDetails`            | Get the details of a position template                                                    |
 | `getDefaultPositionTemplateForPosition` | Get the default position template for a position                                          |
@@ -27,7 +28,8 @@ For connection and authentication setup, see [setup.md](setup.md).
 | `getBookingTemplateDetailsForRebooking` | Get pre-filled booking data from a booking template                                       |
 | `getShiftgroupDetailsForRebooking`      | Get pre-filled booking data from a previous shift group                                   |
 | `searchShiftgroups`                     | Search for shift groups by location, position, timeframe, and date range                  |
-| `searchRosteredPros`                    | Search for rostered professionals by location, name, or position                          |
+| `searchRosterLists`                     | Find saved roster lists, such as Favorites or a named crew                                |
+| `searchRosteredPros`                    | Search for individual rostered professionals by location, name, or position               |
 | `createDraftBooking`                    | Create a draft booking with positions, shifts, pricing, and roster details                |
 | `createBooking`                         | Create and confirm a booking with positions, shifts, pricing, payment, and roster details |
 
@@ -38,22 +40,24 @@ Use this checklist for a new booking (one position, one schedule at a time):
 ```
 - [ ] 1. Confirm location — searchCompanyLocations
 - [ ] 2. Confirm position — getPositions
-- [ ] 3. Get position instructions — getPositionTemplates → getPositionTemplateDetails
+- [ ] 3. Confirm skill tier when the position offers tiers — getPositionTiers
+- [ ] 4. Get position instructions — getPositionTemplates → getPositionTemplateDetails
          (if no templates: getDefaultPositionTemplateForPosition)
-- [ ] 4. Discuss attire / requirements if needed — getInstructionsOptions
-- [ ] 5. Confirm onsite contact — getOnsiteContacts
-- [ ] 6. Confirm staffing option (default: Smart assign)
-- [ ] 7. Confirm shift date, start time, end time, headcount
-- [ ] 8. Get break rules — getBreakLength
-- [ ] 9. Get pricing — getBookingPricing → set bill rate to initial rate (unless overridden)
-- [ ] 10. Confirm payment — getPaymentOptions (silent if only one; ask if two or more)
-- [ ] 11. Present booking summary and wait for explicit confirmation
-- [ ] 12. Create booking — createBooking (or createDraftBooking if payment is ambiguous)
+- [ ] 5. Discuss attire / requirements if needed — getInstructionsOptions
+- [ ] 6. Confirm onsite contact — getOnsiteContacts
+- [ ] 7. Confirm staffing option (default: Smart assign)
+         (named list: searchRosterLists; individual pros: searchRosteredPros)
+- [ ] 8. Confirm shift date, start time, end time, headcount
+- [ ] 9. Get break rules — getBreakLength
+- [ ] 10. Get pricing — getBookingPricing → set bill rate to initial rate (unless overridden)
+- [ ] 11. Confirm payment — getPaymentOptions (silent if only one; ask if two or more)
+- [ ] 12. Present booking summary and wait for explicit confirmation
+- [ ] 13. Create booking — createBooking (or createDraftBooking if payment is ambiguous)
 ```
 
-**Rebooking from a template:** use `getBookingTemplates` → `getBookingTemplateDetailsForRebooking` to pre-fill data, then resume from step 7.
+**Rebooking from a template:** use `getBookingTemplates` → `getBookingTemplateDetailsForRebooking` to pre-fill data, then resume from step 8.
 
-**Rebooking from a previous shift:** use `searchShiftgroups` → `getShiftgroupDetailsForRebooking` to pre-fill data, then resume from step 7.
+**Rebooking from a previous shift:** use `searchShiftgroups` → `getShiftgroupDetailsForRebooking` to pre-fill data, then resume from step 8.
 
 ## Booking Summary Template
 
@@ -64,11 +68,13 @@ Always present this before creating a booking and wait for explicit confirmation
 **Booking Summary**
 - Location: [Location name]
 - Position: [Position] (x[number] pros)
+- Skill level: [Tier display title; omit when no tier is selected]
 - Date: [Date]
 - Time: [Start] – [End] ([Duration] hours)
 - Break: [Length] minutes
 - Rate/hour: $[Rate]
-- Special requests: [Any requested pros or instructions]
+- Requested staffing: [Smart assign | Requested only — names or roster lists]
+- Special requests: [Any instructions]
 ---
 Does this look correct? Reply 'confirm' to book or let me know what to change.
 ```
@@ -86,17 +92,29 @@ Does this look correct? Reply 'confirm' to book or let me know what to change.
 
 ### Position and Instructions Setup
 
-> **Critical:** Attire, job duties, and on-site instructions directly affect shift outcomes. Do **not** post a shift until these fields are captured (see steps 3–4 of the workflow above).
+> **Critical:** Attire, job duties, and on-site instructions directly affect shift outcomes. Do **not** post a shift until these fields are captured (see steps 4–5 of the workflow above).
+
+### Position Tiering
+
+- After resolving the numeric position ID with `getPositions`, call `getPositionTiers`.
+- If tiers are returned, ask the partner to choose by display name, such as Basic, Intermediate, or Expert.
+- Pass the selected tier's `id` as `positions[].position_tiering` to `createBooking` or `createDraftBooking`.
+- Do not show the tier ID to the partner. If no tiers are returned, omit `position_tiering`.
 
 ### Staffing Options
 
 | Option                  | Behaviour                                                                                                                   |
 | ----------------------- | --------------------------------------------------------------------------------------------------------------------------- |
 | **Smart assign**        | Prioritises requested pros → rostered pros → best market pros → all other pros. ML-driven to balance quality and fill rate. |
-| **Requested pros only** | Only opens the shift to explicitly requested professionals. Look these up using `searchRosteredPros`.                       |
+| **Requested pros only** | Only opens the shift to explicitly requested professionals or members of selected roster lists.                            |
 | **New pros**            | Opens the shift to professionals who have not previously worked with this partner.                                          |
 
 Default to **Smart assign** unless the partner specifies otherwise.
+
+- When the partner names a saved group, such as Favorites or Event Staff, call `searchRosterLists` and pass the selected list `id` in `roster.requested_roster_ids`.
+- When the partner names individual professionals, call `searchRosteredPros` and pass their numeric IDs in `roster.requested_worker_ids`.
+- Never send both `requested_roster_ids` and `requested_worker_ids` with values in the same booking request.
+- Set `roster.is_requested_worker_only` to `true` only when the partner wants the booking restricted to the selected list members or individuals. Keep it `false` to prioritize them while allowing other pros to book.
 
 ### Pricing
 
